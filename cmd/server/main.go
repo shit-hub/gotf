@@ -11,6 +11,8 @@ import (
 
 var host = flag.String("l", "0.0.0.0:3000", "Listen Host")
 var path = flag.String("f", ".", "Download Path")
+var aes = flag.String("aes", "", "enable AES encrypt and set mode: CBC/ECB/CFB")
+var aesKey = flag.String("aes-key", "ABCDEFGHIJKLMNOP", "the key of AES encrypt")
 
 func main() {
 	flag.Parse()

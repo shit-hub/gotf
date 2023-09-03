@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/binary"
+	"gotf/encrypt"
 	"io"
 	"io/ioutil"
 	"log"
@@ -94,7 +95,6 @@ func sendFile(ch chan int, wg *sync.WaitGroup, p *mpb.Progress, host, path, file
 	}
 
 	// Send file
-	var curSize int64
 	buf := make([]byte, bufSize)
 	bar := p.AddBar(int64(fileSize),
 		mpb.PrependDecorators(
@@ -111,22 +111,39 @@ func sendFile(ch chan int, wg *sync.WaitGroup, p *mpb.Progress, host, path, file
 		),
 	)
 	for {
-		n, err := f.Read(buf)
+		n, readErr := f.Read(buf)
 
 		if n > 0 {
-			wn, err := conn.Write(buf[0:n])
+			// Encrypt buffer
+			body := encrypt.AesEncrypt(buf[0:n], []byte(*aesKey), *aes)
+			// Send buffer length
+			bufSizeBuf := bytes.NewBuffer([]byte{})
+			err = binary.Write(bufSizeBuf, binary.BigEndian, uint32(len(body)))
 			if err != nil {
-				log.Printf("Failed to send file[%s]: %v", filename, err)
+				log.Printf("Failed to write buffer size to buffer: ", err)
+				break
+			}
+			_, err = conn.Write(bufSizeBuf.Bytes())
+			if err != nil {
+				log.Printf("Failed to send buffer size: %v", err)
 				break
 			}
 
-			curSize += int64(wn)
-			bar.IncrInt64(int64(wn))
+			//Send buffer
+			_, err := conn.Write(body)
+			if err != nil {
+				log.Printf("Failed to send buffer[%s]: %v", filename, err)
+				break
+			}
+
+			// Update bar
+			bar.IncrInt64(int64(n))
 		}
 
-		if err != nil {
-			if err != io.EOF {
-				log.Printf("Failed to read file[%s]: %v", filename, err)
+		// Send Complete
+		if readErr != nil {
+			if readErr != io.EOF {
+				log.Printf("Failed to read file[%s]: %v", filename, readErr)
 			}
 			break
 		}
