@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/binary"
+	"gotf/encrypt"
 	"io"
 	"log"
 	"net"
@@ -12,8 +13,6 @@ import (
 	"github.com/vbauerster/mpb/v8"
 	"github.com/vbauerster/mpb/v8/decor"
 )
-
-const bufSize = 2048
 
 func createDir(filename string) {
 	index := strings.LastIndex(filename, "/")
@@ -66,8 +65,6 @@ func receiveFile(conn net.Conn, p *mpb.Progress, path string) {
 	}
 	defer f.Close()
 
-	var size int64
-	buf := make([]byte, bufSize)
 	bar := p.AddBar(int64(fileSize),
 		mpb.PrependDecorators(
 			// display our name with one space on the right
@@ -82,22 +79,33 @@ func receiveFile(conn net.Conn, p *mpb.Progress, path string) {
 			),
 		),
 	)
+
+	offset := int64(0)
 	for {
+		var bufSize uint32
+		bufSizeBuf := make([]byte, 4)
+		_, readErr := conn.Read(bufSizeBuf)
+
+		err := binary.Read(bytes.NewBuffer(bufSizeBuf), binary.BigEndian, &bufSize)
+		if err != nil {
+			log.Println("Failed to read size form buffer: ", err)
+			break
+		}
+
+		buf := make([]byte, bufSize)
 		n, err := conn.Read(buf)
 
 		if n > 0 {
-			if err != nil {
-				log.Printf("Failed to get file[%s] stat: %v", fnStr, err)
-				break
-			}
-			f.WriteAt(buf[0:n], size)
-			size += int64(n)
-			bar.IncrInt64(int64(n))
+			decrypted := encrypt.AesDecrypt(buf[0:n], []byte(*aesKey), *aes)
+			f.WriteAt(decrypted, offset)
+			offset += int64(len(decrypted))
+			bar.IncrInt64(int64(len(decrypted)))
 		}
 
-		if err != nil {
-			if err != io.EOF {
-				log.Printf("Failed to read from connection: %v", err)
+		// Read Complete
+		if readErr != nil {
+			if readErr != io.EOF {
+				log.Println("Failed to read buffer size: ", readErr)
 			}
 			break
 		}
